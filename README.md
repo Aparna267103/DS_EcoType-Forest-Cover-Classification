@@ -21,6 +21,7 @@ The project aims to support environmental monitoring, forest resource management
 * Columns: 13
 * Target Variable: Cover_Type
 * Classes: 7 Forest Cover Types
+* Dataset Source: https://drive.google.com/file/d/1UzSSMGF9iqSb8YnSRXMt02v3uf9ZUOf6/view?usp=sharing
 
 🔹 Features Used
 * Elevation
