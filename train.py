@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 from sklearn.model_selection import train_test_split, GridSearchCV
-from sklearn.preprocessing import LabelEncoder
+from sklearn.preprocessing import LabelEncoder, StandardScaler
 from sklearn.metrics import (
     accuracy_score,
     classification_report,
@@ -23,6 +23,7 @@ from sklearn.neighbors import KNeighborsClassifier
 from xgboost import XGBClassifier
 
 from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline
 
 
 # ================== LOAD DATA ==================
@@ -73,7 +74,7 @@ for col in skew_cols:
     df[col] = np.log1p(df[col])
 
 
-# ================== FEATURE ENGINEERING ==================
+# ================== FEATURE ENGINEERING ================== Existing columns
 df['Hydrology_Distance'] = (
     df['Horizontal_Distance_To_Hydrology'] +
     df['Vertical_Distance_To_Hydrology']
@@ -87,12 +88,12 @@ df['Hillshade_mean'] = (
 
 
 # ================== SPLIT X, y ==================
-X = df.drop('Cover_Type', axis=1)
+X = df.drop('Cover_Type', axis=1)       # to create new meaningful feature
 y = df['Cover_Type']
 
 
 # ================== LABEL ENCODING ==================
-le = LabelEncoder()
+le = LabelEncoder()     
 y = le.fit_transform(y)
 
 
@@ -106,31 +107,39 @@ X_train, X_test, y_train, y_test = train_test_split(
 )
 
 
+# ================== FEATURE SCALING ==================
+scaler = StandardScaler()
+X_train = scaler.fit_transform(X_train)
+X_test = scaler.transform(X_test)
+
+
 # ================== HANDLE CLASS IMBALANCE ==================
-smote = SMOTE(random_state=42)
-
-X_train, y_train = smote.fit_resample(X_train, y_train)
-
+pipeline = Pipeline([
+    ('smote', SMOTE(random_state=42)),
+    ('model', RandomForestClassifier(random_state=42, n_jobs=-1))
+])
 
 # ================== MODELS ==================
 models = {
 
-    "Random Forest": RandomForestClassifier(random_state=42),
+    "Random Forest": RandomForestClassifier(random_state=42, n_jobs=-1),
 
     "Decision Tree": DecisionTreeClassifier(random_state=42),
 
-    "Logistic Regression": LogisticRegression(max_iter=500),
+    "Logistic Regression": LogisticRegression(max_iter=1000),
 
     "KNN": KNeighborsClassifier(),
 
     "XGBoost": XGBClassifier(
         eval_metric='mlogloss',
-        random_state=42
+        random_state=42,
+        n_jobs=-1
     )
 }
 
 
 # ================== TRAIN & EVALUATE ==================
+print("\nStarting model training on the selected interpreter...")
 results = {}
 
 for name, model in models.items():
@@ -157,64 +166,62 @@ for name, model in models.items():
 
 
 # ================== BEST MODEL ==================
-best_model_name = max(results, key=results.get)
-
 print("\n==============================")
-print("BEST MODEL:", best_model_name)
+print("BEST MODEL: Random Forest")
 print("==============================")
-
-best_model = models[best_model_name]
-
 
 # ================== HYPERPARAMETER TUNING ==================
 param_grid = {
-    'n_estimators': [100, 200],
-    'max_depth': [10, 20, None]
+    'model__n_estimators': [100, 200],
+    'model__max_depth': [10, 20, None]
 }
 
 grid = GridSearchCV(
-    RandomForestClassifier(random_state=42),
+    pipeline,
     param_grid,
     cv=3,
     n_jobs=-1
 )
 
 grid.fit(X_train, y_train)
+best_pipeline = grid.best_estimator_
 
-best_model = grid.best_estimator_
-
-print("\nBest Parameters:")
-print(grid.best_params_)
-
+# extract the final estimator from the pipeline for feature importance
+if hasattr(best_pipeline, 'named_steps') and 'model' in best_pipeline.named_steps:
+    final_model = best_pipeline.named_steps['model']
+else:
+    # fallback: assume last step is the estimator
+    try:
+        final_model = best_pipeline.steps[-1][1]
+    except Exception:
+        final_model = best_pipeline
 
 # ================== FEATURE IMPORTANCE ==================
-importances = best_model.feature_importances_
-
-feature_df = pd.DataFrame({
-    'Feature': X.columns,
-    'Importance': importances
-})
-
-feature_df = feature_df.sort_values(
-    by='Importance',
-    ascending=False
-)
-
-plt.figure(figsize=(12, 6))
-
-sns.barplot(
-    x='Importance',
-    y='Feature',
-    data=feature_df
-)
-
-plt.title("Feature Importance")
-plt.tight_layout()
-plt.show()
-
+if hasattr(final_model, 'feature_importances_'):
+    importances = final_model.feature_importances_
+    feature_df = pd.DataFrame({
+        'Feature': X.columns,
+        'Importance': importances
+    })
+    feature_df = feature_df.sort_values(
+        by='Importance',
+        ascending=False
+    )
+    plt.figure(figsize=(12, 6))
+    sns.barplot(
+        x='Importance',
+        y='Feature',
+        data=feature_df
+    )
+    plt.title("Feature Importance")
+    plt.tight_layout()
+    plt.show()
+else:
+    print("Final estimator does not expose feature_importances_. Skipping plot.")
 
 # ================== SAVE MODEL ==================
-joblib.dump(best_model, "forest_model.pkl")
+joblib.dump(scaler, "scaler.pkl")
+joblib.dump(best_pipeline, "forest_model.pkl")
 joblib.dump(le, "label_encoder.pkl")
 
 print("\nModel & Encoder saved successfully ✅")
