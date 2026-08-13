@@ -9,6 +9,13 @@ import joblib
 model = joblib.load("forest_model.pkl")
 le = joblib.load("label_encoder.pkl")
 
+# Try to load a saved scaler; if missing, fit one from the training CSV as a fallback
+scaler = joblib.load("scaler.pkl")
+try:
+        joblib.dump(scaler, "scaler.pkl")
+except Exception:
+        pass
+
 st.set_page_config(page_title="Forest Cover Prediction")
 
 st.title("🌲 EcoType: Forest Cover Prediction")
@@ -141,7 +148,9 @@ if st.button("Predict Cover Type"):
     })
 
     # ================== PREDICTION ==================
-    prediction = model.predict(input_data)
+    # scale input to match training preprocessing
+    input_scaled = scaler.transform(input_data)
+    prediction = model.predict(input_scaled)
 
     output = le.inverse_transform(prediction)
 
